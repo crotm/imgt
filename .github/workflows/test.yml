@@ -26,11 +26,10 @@ jobs:
           echo "--- ALL ENVIRONMENT VARIABLES ---"
           env | sort
           echo "---------------------------------"
-          apt-cache search '^tree$'
 
       - name: Locate NDK
         run: |
-          export NDK="/home/builder/lib/android-ndk"
+          env
           # Check multiple common variables used in Termux images
           if [ -n "$NDK" ]; then
             echo "NDK found via \$NDK: $NDK"
@@ -52,7 +51,6 @@ jobs:
               exit 1
             fi
           fi
-          tree $NDK || true
 
       - name: Verify Compiler and Python
         run: |
