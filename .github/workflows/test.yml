@@ -10,7 +10,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Docker Hub images (no prefix needed) and GHCR image
         image: [
           "termux/package-builder:latest",
           "excedrin/termux-builder:latest",
@@ -19,49 +18,61 @@ jobs:
 
     container:
       image: ${{ matrix.image }}
-      # We run as root to ensure GitHub Actions can initialize the workspace
       options: --user root
 
     steps:
-      - name: Environment Info
+      - name: Inspect Environment Variables
         run: |
-          echo "Testing Image: ${{ matrix.image }}"
-          echo "OS Version:"
-          cat /etc/os-release | grep PRETTY_NAME
-          echo "NDK Location: $ANDROID_NDK_ROOT"
+          echo "--- ALL ENVIRONMENT VARIABLES ---"
+          env | sort
+          echo "---------------------------------"
 
-      - name: Verify Compiler Toolchain
+      - name: Locate NDK
         run: |
-          # Check if the Android NDK compilers are accessible
-          if [ -d "$ANDROID_NDK_ROOT" ]; then
-            echo "NDK found at $ANDROID_NDK_ROOT"
-            find $ANDROID_NDK_ROOT -name "clang" | head -n 1
-          elif [ -f "$ANDROID_HOME" ]; then
-            echo "NDK found at $ANDROID_HOME"
-            find $ANDROID_HOME -name "clang" | head -n 1
+          env
+          # Check multiple common variables used in Termux images
+          if [ -n "$NDK" ]; then
+            echo "NDK found via \$NDK: $NDK"
+            echo "FINAL_NDK_PATH=$NDK" >> $GITHUB_ENV
+          elif [ -n "$ANDROID_NDK_ROOT" ]; then
+            echo "NDK found via \$ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
+            echo "FINAL_NDK_PATH=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+          elif [ -d "/home/builder/lib/android-ndk" ]; then
+            echo "NDK found at default path: /home/builder/lib/android-ndk"
+            echo "FINAL_NDK_PATH=/home/builder/lib/android-ndk" >> $GITHUB_ENV
           else
-            echo "NDK NOT FOUND! This image might be broken."
+            echo "NDK variable not set. Searching filesystem..."
+            SEARCH_RESULT=$(find / -name "source.properties" | grep "ndk" | head -n 1 | sed 's|/source.properties||')
+            if [ -n "$SEARCH_RESULT" ]; then
+              echo "NDK found via search: $SEARCH_RESULT"
+              echo "FINAL_NDK_PATH=$SEARCH_RESULT" >> $GITHUB_ENV
+            else
+              echo "ERROR: Could not find NDK anywhere!"
+              exit 1
+            fi
           fi
-          clang --version
+
+      - name: Verify Compiler and Python
+        run: |
+          echo "Using NDK Path: $FINAL_NDK_PATH"
+          
+          # Find the clang compiler inside the NDK
+          # It's usually in toolchains/llvm/prebuilt/linux-x86_64/bin/clang
+          NDK_CLANG=$(find $FINAL_NDK_PATH -name "clang" | grep "bin/clang" | head -n 1)
+          
+          if [ -f "$NDK_CLANG" ]; then
+            echo "NDK Clang found: $NDK_CLANG"
+            $NDK_CLANG --version | head -n 1
+          else
+            echo "Warning: NDK Clang not found at expected sub-path."
+          fi
+          
+          echo -n "Python3 version: "
           python3 --version
 
-      - name: Checkout Termux Packages
-        uses: actions/checkout@v4
-        with:
-          repository: termux/termux-packages
-          path: termux-packages
-          fetch-depth: 1
-
-      - name: Test Build Script (Dry Run)
-        working-directory: ./termux-packages
+      - name: Test Build Script Entrypoint
         run: |
-          # The build-package.sh script is the heart of these images.
-          # We run it with -h (help) to ensure all dependencies (python, etc) are present.
-          ./build-package.sh -h
-          
-          # Check if the 'builder' user exists (standard for these images)
-          id builder || echo "User 'builder' does not exist in this image version."
-
-      - name: Summary
-        run: |
-          echo "Successfully verified ${{ matrix.image }}"
+          git clone --depth 1 https://github.com/termux/termux-packages.git
+          cd termux-packages
+          # This confirms the image has all dependencies to run the main build logic
+          ./build-package.sh -h | head -n 5
