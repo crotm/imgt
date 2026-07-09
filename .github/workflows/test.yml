@@ -30,7 +30,6 @@ jobs:
       - name: Locate NDK
         run: |
           export NDK="/home/builder/lib/android-ndk"
-          /usr/bin/sudo /usr/bin/apt install tree
           # Check multiple common variables used in Termux images
           if [ -n "$NDK" ]; then
             echo "NDK found via \$NDK: $NDK"
