@@ -52,7 +52,7 @@ jobs:
               exit 1
             fi
           fi
-          tree $NDK
+          /usr/bin/tree $NDK
 
       - name: Verify Compiler and Python
         run: |
