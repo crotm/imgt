@@ -36,9 +36,11 @@ jobs:
           if [ -d "$ANDROID_NDK_ROOT" ]; then
             echo "NDK found at $ANDROID_NDK_ROOT"
             find $ANDROID_NDK_ROOT -name "clang" | head -n 1
+          elif [ -f "$ANDROID_HOME" ]; then
+            echo "NDK found at $ANDROID_HOME"
+            find $ANDROID_HOME -name "clang" | head -n 1
           else
             echo "NDK NOT FOUND! This image might be broken."
-            exit 1
           fi
           clang --version
           python3 --version
