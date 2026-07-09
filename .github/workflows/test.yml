@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +71,9 @@ jobs:
           
           echo -n "Python3 version: "
           python3 --version
+      - name: List full structure
+        run: |
+          tree $FINAL_NDK_PATH
 
       - name: Test Build Script Entrypoint
         run: |
