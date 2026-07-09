@@ -26,6 +26,7 @@ jobs:
           echo "--- ALL ENVIRONMENT VARIABLES ---"
           env | sort
           echo "---------------------------------"
+          apt-cache search '^tree$'
 
       - name: Locate NDK
         run: |
