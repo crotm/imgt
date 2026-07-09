@@ -1,0 +1,65 @@
+name: Termux Builder Matrix Test
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Docker Hub images (no prefix needed) and GHCR image
+        image: [
+          "termux/package-builder:latest",
+          "excedrin/termux-builder:latest",
+          "ghcr.io/crotm/termux-builder:latest"
+        ]
+
+    container:
+      image: ${{ matrix.image }}
+      # We run as root to ensure GitHub Actions can initialize the workspace
+      options: --user root
+
+    steps:
+      - name: Environment Info
+        run: |
+          echo "Testing Image: ${{ matrix.image }}"
+          echo "OS Version:"
+          cat /etc/os-release | grep PRETTY_NAME
+          echo "NDK Location: $ANDROID_NDK_ROOT"
+
+      - name: Verify Compiler Toolchain
+        run: |
+          # Check if the Android NDK compilers are accessible
+          if [ -d "$ANDROID_NDK_ROOT" ]; then
+            echo "NDK found at $ANDROID_NDK_ROOT"
+            find $ANDROID_NDK_ROOT -name "clang" | head -n 1
+          else
+            echo "NDK NOT FOUND! This image might be broken."
+            exit 1
+          fi
+          clang --version
+          python3 --version
+
+      - name: Checkout Termux Packages
+        uses: actions/checkout@v4
+        with:
+          repository: termux/termux-packages
+          path: termux-packages
+          fetch-depth: 1
+
+      - name: Test Build Script (Dry Run)
+        working-directory: ./termux-packages
+        run: |
+          # The build-package.sh script is the heart of these images.
+          # We run it with -h (help) to ensure all dependencies (python, etc) are present.
+          ./build-package.sh -h
+          
+          # Check if the 'builder' user exists (standard for these images)
+          id builder || echo "User 'builder' does not exist in this image version."
+
+      - name: Summary
+        run: |
+          echo "Successfully verified ${{ matrix.image }}"
