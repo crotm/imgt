@@ -29,7 +29,6 @@ jobs:
 
       - name: Locate NDK
         run: |
-          apt install tree
           # Check multiple common variables used in Termux images
           if [ -n "$NDK" ]; then
             echo "NDK found via \$NDK: $NDK"
@@ -51,6 +50,9 @@ jobs:
               exit 1
             fi
           fi
+          sudo apt update
+          apt-cache policy tree
+          apt install tree
 
       - name: Verify Compiler and Python
         run: |
