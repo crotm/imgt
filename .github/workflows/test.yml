@@ -29,7 +29,7 @@ jobs:
 
       - name: Locate NDK
         run: |
-          env
+          apt install tree
           # Check multiple common variables used in Termux images
           if [ -n "$NDK" ]; then
             echo "NDK found via \$NDK: $NDK"
