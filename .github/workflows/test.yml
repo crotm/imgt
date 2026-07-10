@@ -60,5 +60,15 @@ jobs:
 
       - name: Cleanup
         if: always()
+        working-directory: ./termux-packages
+        env:
+          TERMUX_BUILDER_IMAGE_NAME: ${{ matrix.image }}
+          CONTAINER_NAME: builder-${{ strategy.job-index }}
+          TERMUX_DOCKER_USE_SUDO: "1"
+        run: |
+          ./scripts/run-docker.sh ./build-package.sh -d -j8 python
+
+      - name: Cleanup
+        if: always()
         run: |
           sudo docker rm -f builder-${{ strategy.job-index }} || true
