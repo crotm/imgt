@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-test:
+  test-images:
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -16,68 +16,60 @@ jobs:
           "ghcr.io/crotm/termux-builder:latest"
         ]
 
-    container:
-      image: ${{ matrix.image }}
-      options: --user root
-
     steps:
-      - name: Inspect Environment Variables
-        run: |
-          echo "--- ALL ENVIRONMENT VARIABLES ---"
-          env | sort
-          echo "---------------------------------"
+      - name: Checkout termux-packages
+        uses: actions/checkout@v4
+        with:
+          repository: termux/termux-packages
+          path: termux-packages
 
-      - name: Locate NDK
+      - name: Setup Environment
         run: |
-          # Check multiple common variables used in Termux images
-          if [ -n "$NDK" ]; then
-            echo "NDK found via \$NDK: $NDK"
-            echo "FINAL_NDK_PATH=$NDK" >> $GITHUB_ENV
-          elif [ -n "$ANDROID_NDK_ROOT" ]; then
-            echo "NDK found via \$ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
-            echo "FINAL_NDK_PATH=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
-          elif [ -d "/home/builder/lib/android-ndk" ]; then
-            echo "NDK found at default path: /home/builder/lib/android-ndk"
-            echo "FINAL_NDK_PATH=/home/builder/lib/android-ndk" >> $GITHUB_ENV
-          else
-            echo "NDK variable not set. Searching filesystem..."
-            SEARCH_RESULT=$(find / -name "source.properties" | grep "ndk" | head -n 1 | sed 's|/source.properties||')
-            if [ -n "$SEARCH_RESULT" ]; then
-              echo "NDK found via search: $SEARCH_RESULT"
-              echo "FINAL_NDK_PATH=$SEARCH_RESULT" >> $GITHUB_ENV
-            else
-              echo "ERROR: Could not find NDK anywhere!"
-              exit 1
-            fi
-          fi
-          sudo apt update
-          apt-cache policy tree
-          apt install tree
+          # Ensure the script is executable
+          chmod +x termux-packages/scripts/run-docker.sh
+          # Create a dummy file to verify volume mounting later
+          echo "Host-to-Container-Check" > termux-packages/mount-test.txt
 
-      - name: Verify Compiler and Python
+      - name: Run Verification Suite via run-docker.sh
+        working-directory: ./termux-packages
+        env:
+          TERMUX_BUILDER_IMAGE_NAME: ${{ matrix.image }}
+          CONTAINER_NAME: builder-${{ strategy.job-index }}
+          TERMUX_DOCKER_USE_SUDO: "1"
         run: |
-          echo "Using NDK Path: $FINAL_NDK_PATH"
-          
-          # Find the clang compiler inside the NDK
-          # It's usually in toolchains/llvm/prebuilt/linux-x86_64/bin/clang
-          NDK_CLANG=$(find $FINAL_NDK_PATH -name "clang" | grep "bin/clang" | head -n 1)
-          
-          if [ -f "$NDK_CLANG" ]; then
-            echo "NDK Clang found: $NDK_CLANG"
-            $NDK_CLANG --version | head -n 1
-          else
-            echo "Warning: NDK Clang not found at expected sub-path."
-          fi
-          
-          echo -n "Python3 version: "
-          python3 --version
+          echo "--- STARTING TEST FOR ${{ matrix.image }} ---"
+
+          # 1. Test Identity and Permissions
+          echo "Testing User Identity:"
+          ./scripts/run-docker.sh whoami
+          ./scripts/run-docker.sh id
+
+          # 2. Test Environment Variables (NDK, etc.)
+          echo "Testing Environment Variables:"
+          ./scripts/run-docker.sh bash -c 'echo "NDK Path: ${NDK:-$ANDROID_NDK_ROOT}"'
+
+          # 3. Test Volume Mounting (Verify the script mounted the host dir correctly)
+          echo "Testing Volume Mount:"
+          ./scripts/run-docker.sh cat mount-test.txt
+
+          # 4. Test Compiler Toolchain
+          echo "Testing Compiler:"
+          ./scripts/run-docker.sh bash -c 'command -v clang && clang --version | head -n 1'
+
+          # 5. Test Python and Build Dependencies
+          echo "Testing Python:"
+          ./scripts/run-docker.sh python3 --version
+
+          # 6. Test the Build Script Entrypoint
+          echo "Testing Build Script Help:"
+          ./scripts/run-docker.sh ./build-package.sh -h | head -n 5
       - name: List full structure
         run: |
+          apt update
+          apt install tree
           tree $FINAL_NDK_PATH
 
-      - name: Test Build Script Entrypoint
+      - name: Cleanup
+        if: always()
         run: |
-          git clone --depth 1 https://github.com/termux/termux-packages.git
-          cd termux-packages
-          # This confirms the image has all dependencies to run the main build logic
-          ./build-package.sh -h | head -n 5
+          sudo docker rm -f builder-${{ strategy.job-index }} || true
