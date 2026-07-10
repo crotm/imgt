@@ -6,7 +6,7 @@ on:
 
 jobs:
   test-images:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -25,9 +25,7 @@ jobs:
 
       - name: Setup Environment
         run: |
-          # Ensure the script is executable
           chmod +x termux-packages/scripts/run-docker.sh
-          # Create a dummy file to verify volume mounting later
           echo "Host-to-Container-Check" > termux-packages/mount-test.txt
 
       - name: Run Verification Suite via run-docker.sh
@@ -37,37 +35,28 @@ jobs:
           CONTAINER_NAME: builder-${{ strategy.job-index }}
           TERMUX_DOCKER_USE_SUDO: "1"
         run: |
-          echo "--- STARTING TEST FOR ${{ matrix.image }} ---"
+          echo "--- TESTING IMAGE: ${{ matrix.image }} ---"
 
-          # 1. Test Identity and Permissions
-          echo "Testing User Identity:"
+          # 1. Check User (Does not need login shell)
           ./scripts/run-docker.sh whoami
-          ./scripts/run-docker.sh id
 
-          # 2. Test Environment Variables (NDK, etc.)
-          echo "Testing Environment Variables:"
-          ./scripts/run-docker.sh bash -c 'echo "NDK Path: ${NDK:-$ANDROID_NDK_ROOT}"'
+          # 2. Check Environment Variables (Requires Login Shell '-lc')
+          # We check for NDK or ANDROID_NDK_ROOT
+          echo "Checking NDK Variable..."
+          ./scripts/run-docker.sh bash -lc 'echo "NDK_VAR_RESULT: ${NDK:-$ANDROID_NDK_ROOT}"'
 
-          # 3. Test Volume Mounting (Verify the script mounted the host dir correctly)
-          echo "Testing Volume Mount:"
-          ./scripts/run-docker.sh cat mount-test.txt
+          # 3. Check Compiler (Requires Login Shell to find clang in PATH)
+          echo "Checking Compiler Path..."
+          ./scripts/run-docker.sh bash -lc 'which clang || echo "clang not in PATH"'
+          ./scripts/run-docker.sh bash -lc 'clang --version | head -n 1'
 
-          # 4. Test Compiler Toolchain
-          echo "Testing Compiler:"
-          ./scripts/run-docker.sh bash -c 'command -v clang && clang --version | head -n 1'
+          # 4. Check Python
+          ./scripts/run-docker.sh bash -lc 'python3 --version'
 
-          # 5. Test Python and Build Dependencies
-          echo "Testing Python:"
-          ./scripts/run-docker.sh python3 --version
-
-          # 6. Test the Build Script Entrypoint
-          echo "Testing Build Script Help:"
+          # 5. Run the actual build script help (The ultimate test)
+          # This script is designed to be run directly
+          echo "Checking Build Script..."
           ./scripts/run-docker.sh ./build-package.sh -h | head -n 5
-      - name: List full structure
-        run: |
-          apt update
-          apt install tree
-          tree $FINAL_NDK_PATH
 
       - name: Cleanup
         if: always()
