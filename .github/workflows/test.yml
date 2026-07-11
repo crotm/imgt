@@ -47,9 +47,24 @@ jobs:
     - name: Pull image
       run: docker pull "$IMAGE"
 
+    # properties.sh requires repo.json to exist at the repo root
+    # ($TERMUX_PKGS__BUILD__REPO_ROOT_DIR/repo.json). The Dockerfile only
+    # COPYs scripts/ into the image, so a container run standalone (no
+    # repo mounted) is missing it - upstream even has a FIXME about this.
+    # Check out the source repo just to bind-mount that one file in.
+    - name: Checkout termux-builder (for repo.json only)
+      uses: actions/checkout@v7
+      with:
+        repository: ${{ env.SOURCE_REPO }}
+        path: termux-builder
+        fetch-depth: 1
+        sparse-checkout: |
+          repo.json
+        sparse-checkout-cone-mode: false
+
     - name: User, sudo, and tool sanity
       run: |
-        docker run --rm "$IMAGE" bash -c '
+        docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
           set -e -u -o pipefail
           [ "$(whoami)" = builder ]
           [ "$HOME" = /home/builder ]
@@ -59,7 +74,7 @@ jobs:
 
     - name: NDK and SDK are present at the expected paths
       run: |
-        docker run --rm "$IMAGE" bash -c '
+        docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
           set -e -u -o pipefail
           . /tmp/termux-packages/scripts/properties.sh
           echo "NDK=$NDK"
@@ -74,7 +89,7 @@ jobs:
 
     - name: Replacement Clang is installed and wrappers work
       run: |
-        docker run --rm "$IMAGE" bash -c '
+        docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
           set -e -u -o pipefail
           . /tmp/termux-packages/scripts/properties.sh
           LLVM_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -103,7 +118,7 @@ jobs:
 
     - name: Compile a trivial program for each ABI
       run: |
-        docker run --rm "$IMAGE" bash -c '
+        docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
           set -e -u -o pipefail
           . /tmp/termux-packages/scripts/properties.sh
           LLVM_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -123,9 +138,19 @@ jobs:
     - name: Pull image
       run: docker pull "$CGCT_IMAGE"
 
+    - name: Checkout termux-builder (for repo.json only)
+      uses: actions/checkout@v7
+      with:
+        repository: ${{ env.SOURCE_REPO }}
+        path: termux-builder
+        fetch-depth: 1
+        sparse-checkout: |
+          repo.json
+        sparse-checkout-cone-mode: false
+
     - name: CGCT toolchain sanity
       run: |
-        docker run --rm "$CGCT_IMAGE" bash -c '
+        docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$CGCT_IMAGE" bash -c '
           set -e -u -o pipefail
           . /tmp/termux-packages/scripts/properties.sh
           echo "CGCT_DIR=$CGCT_DIR"
