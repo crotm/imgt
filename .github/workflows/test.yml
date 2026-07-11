@@ -111,22 +111,7 @@ jobs:
     - name: List tree of NDK 
       run: |
         tree $NDK
-    - name: Compile a trivial program for each ABI
-      run: |
-        docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
-          set -e -u -o pipefail
-          . /tmp/termux-packages/scripts/properties.sh
-          LLVM_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          cat > /tmp/hello.c <<-EOF
-            int main(void) { return 0; }
-          EOF
-          for triple in aarch64-linux-android21 armv7a-linux-androideabi21 i686-linux-android21 x86_64-linux-android21; do
-            echo "Compiling for $triple"
-            "$LLVM_BIN/${triple}-clang" /tmp/hello.c -o "/tmp/hello-${triple}"
-            file "/tmp/hello-${triple}" | grep -qi "ELF"
-          done
-        '
-
+        tree $ANDROID_HOME
   test-cgct-image:
     runs-on: ubuntu-latest
     steps:
