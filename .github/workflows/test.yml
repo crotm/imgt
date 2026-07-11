@@ -107,8 +107,14 @@ jobs:
                 continue
               fi
               target=$("$wrapper" -dumpmachine 2>/dev/null || true)
+              # Compare by CPU + "android" + API level rather than a raw
+              # substring match against $arch: clang'''s own -dumpmachine
+              # output normalizes triples (e.g. inserts "unknown", drops
+              # "eabi"), so "armv7a-linux-androideabi21" legitimately
+              # reports as "armv7a-unknown-linux-android21".
+              cpu="${arch%%-*}"
               case "$target" in
-                *"$arch"*) ;;
+                "$cpu"*android*"$api") ;;
                 *) echo "BAD TARGET for $wrapper: $target"; fail=1 ;;
               esac
             done
