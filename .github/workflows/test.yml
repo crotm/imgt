@@ -1,74 +1,164 @@
-name: Termux Builder Matrix Test
+name: Test termux-builder image
+
+# Standalone image test - lives in a DIFFERENT repo than crotm/termux-builder.
+# It never builds the image itself; it pulls whatever was published and pokes
+# at it, so it can gate "did the last publish actually work" independently of
+# the source repo's own CI.
+#
+# Only the package-build smoke test needs source files (build-package.sh,
+# run-docker.sh, a package to build), so that job does a throwaway shallow
+# checkout of crotm/termux-builder just for those - it does not build
+# anything from that checkout, only uses it to drive the already-published
+# image.
 
 on:
-  push:
   workflow_dispatch:
+    inputs:
+      image:
+        description: 'Base builder image to test'
+        default: ghcr.io/crotm/termux-builder:latest
+        required: false
+      cgct_image:
+        description: 'CGCT builder image to test'
+        default: ghcr.io/crotm/termux-builder-cgct:latest
+        required: false
+  schedule:
+    # Re-check the published images daily, independent of when they were
+    # last rebuilt, in case the registry ever serves a stale/broken tag.
+    - cron: '30 4 * * *'
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        default: ghcr.io/crotm/termux-builder:latest
+      cgct_image:
+        type: string
+        default: ghcr.io/crotm/termux-builder-cgct:latest
+
+env:
+  IMAGE: ${{ inputs.image || 'ghcr.io/crotm/termux-builder:latest' }}
+  CGCT_IMAGE: ${{ inputs.cgct_image || 'ghcr.io/crotm/termux-builder-cgct:latest' }}
+  SOURCE_REPO: crotm/termux-builder
 
 jobs:
-  test-images:
+  test-base-image:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [
-          "termux/package-builder:latest",
-          "excedrin/termux-builder:latest",
-          "ghcr.io/crotm/termux-builder:latest"
-        ]
-
     steps:
-      - name: Checkout termux-packages
-        uses: actions/checkout@v4
-        with:
-          repository: termux/termux-packages
-          path: termux-packages
+    - name: Pull image
+      run: docker pull "$IMAGE"
 
-      - name: Setup Environment
-        run: |
-          chmod +x termux-packages/scripts/run-docker.sh
-          echo "Host-to-Container-Check" > termux-packages/mount-test.txt
+    - name: User, sudo, and tool sanity
+      run: |
+        docker run --rm "$IMAGE" bash -c '
+          set -e -u -o pipefail
+          [ "$(whoami)" = builder ]
+          [ "$HOME" = /home/builder ]
+          sudo -n true
+          command -v jq curl unzip git >/dev/null
+        '
 
-      - name: Run Verification Suite via run-docker.sh
-        working-directory: ./termux-packages
-        env:
-          TERMUX_BUILDER_IMAGE_NAME: ${{ matrix.image }}
-          CONTAINER_NAME: builder-${{ strategy.job-index }}
-          TERMUX_DOCKER_USE_SUDO: "1"
-        run: |
-          echo "--- TESTING IMAGE: ${{ matrix.image }} ---"
+    - name: NDK and SDK are present at the expected paths
+      run: |
+        docker run --rm "$IMAGE" bash -c '
+          set -e -u -o pipefail
+          . /tmp/termux-packages/scripts/properties.sh
+          echo "NDK=$NDK"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          [ -d "$NDK" ]
+          [ -d "$ANDROID_HOME" ]
+          [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] || \
+          [ -x "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ]
+          # setup-android-sdk.sh removes the downloaded zips/cache afterwards
+          [ -z "$(find "$HOME/lib" -maxdepth 1 -name "*.zip" -print -quit)" ]
+        '
 
-          # 1. Check User (Does not need login shell)
-          ./scripts/run-docker.sh whoami
+    - name: Replacement Clang is installed and wrappers work
+      run: |
+        docker run --rm "$IMAGE" bash -c '
+          set -e -u -o pipefail
+          . /tmp/termux-packages/scripts/properties.sh
+          LLVM_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
-          # 2. Check Environment Variables (Requires Login Shell '-lc')
-          # We check for NDK or ANDROID_NDK_ROOT
-          echo "Checking NDK Variable..."
-          ./scripts/run-docker.sh bash -lc 'echo "NDK_VAR_RESULT: ${NDK:-$ANDROID_NDK_ROOT}"'
+          [ -x "$LLVM_BIN/clang" ]
+          [ -x "$LLVM_BIN/clang++" ]
 
-          # 3. Check Compiler (Requires Login Shell to find clang in PATH)
-          echo "Checking Compiler Path..."
-          ./scripts/run-docker.sh bash -lc 'which clang || echo "clang not in PATH"'
-          ./scripts/run-docker.sh bash -lc 'clang --version | head -n 1'
+          fail=0
+          for arch in aarch64-linux-android armv7a-linux-androideabi i686-linux-android x86_64-linux-android; do
+            for api in 21 24 28 30 35; do
+              wrapper="$LLVM_BIN/${arch}${api}-clang"
+              if [ ! -x "$wrapper" ]; then
+                echo "MISSING: $wrapper"
+                fail=1
+                continue
+              fi
+              target=$("$wrapper" -dumpmachine 2>/dev/null || true)
+              case "$target" in
+                *"$arch"*) ;;
+                *) echo "BAD TARGET for $wrapper: $target"; fail=1 ;;
+              esac
+            done
+          done
+          exit "$fail"
+        '
 
-          # 4. Check Python
-          ./scripts/run-docker.sh bash -lc 'python3 --version'
+    - name: Compile a trivial program for each ABI
+      run: |
+        docker run --rm "$IMAGE" bash -c '
+          set -e -u -o pipefail
+          . /tmp/termux-packages/scripts/properties.sh
+          LLVM_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          cat > /tmp/hello.c <<-EOF
+            int main(void) { return 0; }
+          EOF
+          for triple in aarch64-linux-android21 armv7a-linux-androideabi21 i686-linux-android21 x86_64-linux-android21; do
+            echo "Compiling for $triple"
+            "$LLVM_BIN/${triple}-clang" /tmp/hello.c -o "/tmp/hello-${triple}"
+            file "/tmp/hello-${triple}" | grep -qi "ELF"
+          done
+        '
 
-          # 5. Run the actual build script help (The ultimate test)
-          # This script is designed to be run directly
-          echo "Checking Build Script..."
-          ./scripts/run-docker.sh ./build-package.sh -h | head -n 5
+  test-cgct-image:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Pull image
+      run: docker pull "$CGCT_IMAGE"
 
-      - name: Cleanup
-        if: always()
-        working-directory: ./termux-packages
-        env:
-          TERMUX_BUILDER_IMAGE_NAME: ${{ matrix.image }}
-          CONTAINER_NAME: builder-${{ strategy.job-index }}
-          TERMUX_DOCKER_USE_SUDO: "1"
-        run: |
-          ./scripts/run-docker.sh ./build-package.sh -d -j8 python
+    - name: CGCT toolchain sanity
+      run: |
+        docker run --rm "$CGCT_IMAGE" bash -c '
+          set -e -u -o pipefail
+          . /tmp/termux-packages/scripts/properties.sh
+          echo "CGCT_DIR=$CGCT_DIR"
+          [ -d "$CGCT_DIR" ]
+          [ -f "$CGCT_DIR/lib/libgcc_s.so" ]
+          [ -x "$CGCT_DIR/bin/setup-cgct" ] || find "$CGCT_DIR/bin" -name "*-gcc" -print -quit | grep -q .
+        '
 
-      - name: Cleanup
-        if: always()
-        run: |
-          sudo docker rm -f builder-${{ strategy.job-index }} || true
+  package-build-smoke-test:
+    runs-on: ubuntu-latest
+    needs: test-base-image
+    steps:
+    - name: Pull image
+      run: docker pull "$IMAGE"
+
+    # This checkout is only to get build-package.sh / run-docker.sh / a
+    # package definition to drive the already-pulled image with - it is
+    # not built from, so it doesn't matter that this repo isn't
+    # crotm/termux-builder itself.
+    - name: Checkout termux-builder (for build scripts only)
+      uses: actions/checkout@v7
+      with:
+        repository: ${{ env.SOURCE_REPO }}
+        path: termux-builder
+        fetch-depth: 1
+
+    - name: Build a small real package (dos2unix) inside the pulled image
+      working-directory: termux-builder
+      env:
+        TERMUX_BUILDER_IMAGE_NAME: ${{ env.IMAGE }}
+        CONTAINER_NAME: termux-builder-published-image-test
+      run: ./scripts/run-docker.sh ./build-package.sh -I -f dos2unix
+
+    - name: Clean up container
+      if: always()
+      run: docker rm -f termux-builder-published-image-test 2>/dev/null || true
