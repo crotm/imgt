@@ -74,18 +74,37 @@ jobs:
 
     - name: NDK and SDK are present at the expected paths
       run: |
-        docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
-          set -e -u -o pipefail
-          . /tmp/termux-packages/scripts/properties.sh
-          echo "NDK=$NDK"
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          [ -d "$NDK" ]
-          [ -d "$ANDROID_HOME" ]
-          [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ] || \
-          [ -x "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ]
-          # setup-android-sdk.sh removes the downloaded zips/cache afterwards
-          [ -z "$(find "$HOME/lib" -maxdepth 1 -name "*.zip" -print -quit)" ]
-        '
+        docker run --rm \
+            -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" \
+            "$IMAGE" \
+            bash -c '
+              set -euo pipefail
+
+              . /tmp/termux-packages/scripts/properties.sh
+
+              echo "NDK=$NDK"
+              echo "ANDROID_HOME=$ANDROID_HOME"
+
+              test -d "$NDK"
+              test -d "$ANDROID_HOME"
+
+              if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+                SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+              elif [ -x "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" ]; then
+                SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
+              else
+                echo "ERROR: sdkmanager not found."
+                exit 1
+              fi
+
+              echo "sdkmanager: $SDKMANAGER"
+
+              # setup-android-sdk.sh removes downloaded ZIP archives.
+              if find "$HOME/lib" -maxdepth 1 -name "*.zip" -print -quit | grep -q .; then
+                echo "ERROR: ZIP archives were not cleaned up."
+                exit 1
+              fi
+            '
 
     - name: Replacement Clang is installed and wrappers work
       run: |
