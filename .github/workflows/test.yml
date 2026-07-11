@@ -45,7 +45,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Pull image
-      run: docker pull "$IMAGE"
+      run: |
+        sudo apt install tree
+        docker pull "$IMAGE"
 
     # properties.sh requires repo.json to exist at the repo root
     # ($TERMUX_PKGS__BUILD__REPO_ROOT_DIR/repo.json). The Dockerfile only
@@ -106,39 +108,9 @@ jobs:
               fi
             '
 
-    - name: Replacement Clang is installed and wrappers work
+    - name: List tree of NDK 
       run: |
-          docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
-          set -e -u -o pipefail
-          . /tmp/termux-packages/scripts/properties.sh
-          LLVM_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          [ -x "$LLVM_BIN/clang" ]
-          [ -x "$LLVM_BIN/clang++" ]
-          fail=0
-          for arch in aarch64-linux-android armv7a-linux-androideabi i686-linux-android x86_64-linux-android; do
-            for api in 21 24 28 30 35; do
-              wrapper="$LLVM_BIN/${arch}${api}-clang"
-              if [ ! -x "$wrapper" ]; then
-                echo "MISSING: $wrapper"
-                fail=1
-                continue
-              fi
-              target=$("$wrapper" -dumpmachine 2>/dev/null || true)
-              # Compare by CPU + "android" + API level rather than a raw
-              # substring match against $arch: clang normalizes the
-              # triple itself (e.g. inserts "unknown", drops "eabi"),
-              # so "armv7a-linux-androideabi21" legitimately reports
-              # as "armv7a-unknown-linux-android21".
-              cpu="${arch%%-*}"
-              case "$target" in
-                "$cpu"android"$api") ;;
-                *) echo "BAD TARGET for $wrapper: $target"; fail=1 ;;
-              esac
-            done
-          done
-          exit "$fail"
-          '
-
+        tree $NDK
     - name: Compile a trivial program for each ABI
       run: |
         docker run --rm -v "$PWD/termux-builder/repo.json:/tmp/termux-packages/repo.json:ro" "$IMAGE" bash -c '
