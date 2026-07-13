@@ -16,11 +16,11 @@ on:
     inputs:
       image:
         description: 'Base builder image to test'
-        default: ghcr.io/crotm/termux-builder:latest
+        default: excedrin/termux-builder:latest
         required: false
       cgct_image:
         description: 'CGCT builder image to test'
-        default: ghcr.io/crotm/termux-builder-cgct:latest
+        default: excedrin/termux-builder-cgct:latest
         required: false
   schedule:
     # Re-check the published images daily, independent of when they were
@@ -30,14 +30,14 @@ on:
     inputs:
       image:
         type: string
-        default: ghcr.io/crotm/termux-builder:latest
+        default: excedrin/termux-builder:latest
       cgct_image:
         type: string
-        default: ghcr.io/crotm/termux-builder-cgct:latest
+        default: excedrin/termux-builder:latest
 
 env:
-  IMAGE: ${{ inputs.image || 'ghcr.io/crotm/termux-builder:latest' }}
-  CGCT_IMAGE: ${{ inputs.cgct_image || 'ghcr.io/crotm/termux-builder-cgct:latest' }}
+  IMAGE: ${{ inputs.image || 'excedrin/termux-builder:latest' }}
+  CGCT_IMAGE: ${{ inputs.cgct_image || 'excedrin/termux-builder:latest' }}
   SOURCE_REPO: crotm/termux-builder
 
 jobs:
