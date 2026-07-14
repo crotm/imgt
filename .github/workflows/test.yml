@@ -110,8 +110,8 @@ jobs:
 
     - name: List tree of NDK 
       run: |
-        tree $NDK
-        tree $ANDROID_HOME
+        ls $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin || true
+        ls $ANDROID_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin || true
   test-cgct-image:
     runs-on: ubuntu-latest
     steps:
